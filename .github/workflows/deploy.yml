@@ -1,0 +1,44 @@
+# =============================================================================
+#  Pipeline de despliegue en la VM (self-hosted runner).
+#
+#  El agente de GitHub vive DENTRO de la VM. Con cada push a main:
+#    1) Baja el repo en la propia VM (actions/checkout).
+#    2) Escribe el .env con los datos de la base (a la vista, sin secrets).
+#    3) docker compose up -d --build  (construye y levanta todo).
+#
+#  No usa gcloud, ni SSH, ni scp: el runner ya está en la máquina.
+#
+#  ⚠️ Para hackaton / infra descartable: la IP y la contraseña de la base
+#     quedan a la vista en el repo y en los logs de Actions. Si algo de esto
+#     pasara a producción, volver a GitHub Secrets.
+#
+#  Este archivo debe vivir en .github/workflows/ en la RAÍZ del repositorio.
+# =============================================================================
+
+name: Deploy automatico en la VM
+
+on:
+  push:
+    branches: [ main ] # cada push a main despliega solo
+
+jobs:
+  deploy:
+    runs-on: self-hosted # corre en el agente que vive EN la VM
+    steps:
+      - name: Bajar el código en la VM
+        uses: actions/checkout@v4
+
+      - name: Generar el .env (valores a la vista, sin secrets)
+        run: |
+          cat > ejemplo-menu-qr/.env <<'EOF'
+          DB_HOST=34.39.199.46
+          DB_PORT=5432
+          DB_NAME=menu
+          DB_USER=menu
+          DB_PASS=seguro1234
+          EOF
+
+      - name: Construir y levantar
+        run: |
+          cd ejemplo-menu-qr
+          docker compose up -d --build
