@@ -19,10 +19,9 @@ se crea todo… y con otro se borra todo. Vamos a verlo con el ciclo clásico:
 | `variables.tf` | Los datos que cambian (proyecto, región, contraseña…) |
 | `apis.tf` | Enciende las APIs de GCP (Compute y Cloud SQL) |
 | `network.tf` | La IP fija de la VM + las reglas de firewall |
-| `vm.tf` | La VM y su cuenta de servicio |
+| `vm.tf` | La VM (con Docker + el agente de GitHub) y su cuenta de servicio |
 | `database.tf` | La instancia Postgres, la base y el usuario |
-| `cicd.tf` | La cuenta de servicio del pipeline (con permisos y llave) |
-| `outputs.tf` | Los datos que imprime al terminar (IPs, comando SSH, llave) |
+| `outputs.tf` | Los datos que imprime al terminar (IPs, comando SSH) |
 
 > Terraform lee **todos** los `.tf` de la carpeta como un solo programa. Separarlos
 > es solo para que se entienda mejor; el resultado es el mismo.
@@ -69,10 +68,10 @@ crear aparece con un `+` verde. Vas a ver, entre otros, la VM:
       ...
     }
 
-Plan: 13 to add, 0 to change, 0 to destroy.
+Plan: 9 to add, 0 to change, 0 to destroy.
 ```
 
-👉 El mensaje clave es la última línea: **"Plan: 13 to add"**. Todavía no existe nada.
+👉 El mensaje clave es la última línea: **"Plan: 9 to add"**. Todavía no existe nada.
 (El número exacto puede variar un poco según la versión del proveedor.)
 
 ---
@@ -87,18 +86,14 @@ Muestra el mismo plan y pide confirmación. Escribís `yes` y Terraform crea tod
 Al terminar imprime los **outputs**:
 
 ```text
-Apply complete! Resources: 13 added, 0 changed, 0 destroyed.
+Apply complete! Resources: 9 added, 0 changed, 0 destroyed.
 
 Outputs:
 
-ip_de_la_vm    = "34.xx.xx.xx"
-ip_de_la_base  = "35.xx.xx.xx"
-comando_ssh    = "gcloud compute ssh menu-food-truck-vm --zone ..."
-clave_pipeline = <sensitive>
+ip_de_la_vm   = "34.xx.xx.xx"
+ip_de_la_base = "35.xx.xx.xx"
+comando_ssh   = "gcloud compute ssh menu-food-truck-vm --zone ..."
 ```
-
-> La `clave_pipeline` no se muestra (es secreta). La sacás cuando la necesites con:
-> `terraform output -raw clave_pipeline > key.json` (esa llave va al secret `GCP_SA_KEY`).
 
 Podés verificar en la consola de GCP que la VM y la base **están ahí**. O entrar
 a la VM con el `comando_ssh` que te dio.
@@ -115,9 +110,9 @@ Muestra todo lo que va a borrar (cada recurso con un `-` rojo) y pide `yes`.
 Al confirmar, la VM y la base **desaparecen**.
 
 ```text
-Plan: 0 to add, 0 to change, 13 to destroy.
+Plan: 0 to add, 0 to change, 9 to destroy.
 ...
-Destroy complete! Resources: 13 destroyed.
+Destroy complete! Resources: 9 destroyed.
 ```
 
 > 💡 Esta es la idea fuerza de la clase: **lo levanto y lo borro con un comando**.

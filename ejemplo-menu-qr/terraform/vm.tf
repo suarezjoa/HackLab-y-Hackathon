@@ -4,8 +4,13 @@
 #  Crea:
 #    1) Una cuenta de servicio propia para la VM (buena práctica: cada máquina
 #       con su identidad, en vez de usar la cuenta por defecto del proyecto).
-#    2) La VM en sí, con un script de arranque que solo instala Docker + docker
-#       compose (nada de configuración extra).
+#    2) La VM en sí, con un script de arranque que instala Docker + docker
+#       compose y descarga el agente (runner) de GitHub Actions.
+#
+#  La VM queda lista para que un self-hosted runner de GitHub corra ADENTRO:
+#  GitHub ya no entra por SSH desde afuera, así que NO hace falta ninguna llave.
+#  Solo queda un paso manual (una vez): registrar el runner con el token que da
+#  GitHub. Ver el README.
 # =============================================================================
 
 # 1) Identidad de la VM (una cuenta para el "programa", no para una persona).
@@ -36,12 +41,15 @@ resource "google_compute_instance" "vm" {
   }
 
   # Script que corre UNA sola vez, cuando la VM se crea:
-  # solo instala Docker y el plugin de docker compose. Nada más.
+  #   - instala Docker y el plugin de docker compose
+  #   - crea un usuario "runner" con acceso a Docker
+  #   - descarga el agente (runner) de GitHub Actions en /opt/actions-runner
+  # (El registro del runner queda como paso manual: necesita el token de GitHub.)
   metadata_startup_script = <<-EOT
     #!/bin/bash
     set -e
     apt-get update
-    apt-get install -y docker.io curl
+    apt-get install -y docker.io curl tar
     systemctl enable --now docker
 
     # Plugin de docker compose (v2)
@@ -49,6 +57,20 @@ resource "google_compute_instance" "vm" {
     curl -SL "https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64" \
       -o /usr/local/lib/docker/cli-plugins/docker-compose
     chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+    # Usuario dedicado para el runner (no corre como root) con acceso a Docker
+    useradd -m -s /bin/bash runner || true
+    usermod -aG docker runner
+
+    # Descargar el agente de GitHub Actions (última versión disponible)
+    RUNNER_VERSION=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
+    mkdir -p /opt/actions-runner
+    cd /opt/actions-runner
+    curl -o runner.tar.gz -L "https://github.com/actions/runner/releases/download/v$${RUNNER_VERSION}/actions-runner-linux-x64-$${RUNNER_VERSION}.tar.gz"
+    tar xzf runner.tar.gz
+    rm runner.tar.gz
+    ./bin/installdependencies.sh
+    chown -R runner:runner /opt/actions-runner
   EOT
 
   # La VM usa su propia cuenta de servicio.

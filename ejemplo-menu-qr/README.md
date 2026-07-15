@@ -68,11 +68,12 @@ contenedores. La **única** pieza gestionada aparte es la base de datos, en
 
 ## Cómo funciona el reparto de tareas
 
-- **Terraform** crea la VM (con Docker + docker compose ya instalados) y la base
-  Postgres en Cloud SQL. Nada más: no escribe configuración adentro de la VM.
-- **El pipeline** (a mano, desde Actions) arma el `.env` con los datos de la base
-  a partir de los **secrets de GitHub**, copia el código a la VM y corre
-  `docker compose up -d --build` para construir y levantar todo.
+- **Terraform** crea la VM (con Docker + docker compose + el agente de GitHub ya
+  instalados) y la base Postgres en Cloud SQL.
+- **El pipeline** corre en un **runner que vive dentro de la VM**
+  (`runs-on: self-hosted`). Con cada `push`, el runner baja el código ahí mismo,
+  arma el `.env` y corre `docker compose up -d --build`. GitHub nunca entra por
+  SSH desde afuera, así que **no hace falta ninguna llave de GCP**.
 
 ---
 
@@ -165,52 +166,60 @@ terraform apply     # lo crea de verdad
 Al terminar imprime `ip_de_la_vm`, `ip_de_la_base` y `comando_ssh`.
 (Detalle del ciclo plan/apply/destroy en [`terraform/README.md`](terraform/README.md).)
 
-### Paso 2 — Sacar la llave del pipeline
+### Paso 2 — Registrar el runner en la VM (una sola vez)
 
-La cuenta de servicio del pipeline, sus permisos y su llave **ya los creó
-Terraform** (archivo `cicd.tf`). Solo tenés que extraer la llave:
+Terraform ya dejó el agente de GitHub **descargado** en la VM
+(`/opt/actions-runner`), con Docker y docker compose instalados. Falta
+**registrarlo** contra tu repo. Es un paso manual y único, porque necesita un
+token que te da GitHub (y dura poco).
 
-```bash
-terraform output -raw clave_pipeline > key.json
-```
+1. En GitHub: **Settings → Actions → Runners → New self-hosted runner**
+   (elegí **Linux**). Copiá el **token** que aparece en el comando `./config.sh`.
 
-Ese `key.json` es el valor del secret `GCP_SA_KEY` (paso siguiente).
-
-> ⚠️ `key.json` es una contraseña: no la subas al repo y borrala al terminar.
-
-### Paso 3 — Cargar TODOS los secrets en GitHub
-
-Terraform te deja los valores listos. Los 7 no-secretos se imprimen al terminar
-el `apply` (o corré `terraform output secrets_github`). Los 2 secretos se piden
-aparte:
+2. Entrá a la VM y registralo como el usuario `runner`:
 
 ```bash
-terraform output secrets_github        # los 7 valores para copiar y pegar
-terraform output -raw clave_pipeline    # GCP_SA_KEY
-terraform output -raw db_password       # DB_PASSWORD
+gcloud compute ssh menu-food-truck-vm --zone southamerica-east1-a
+sudo su - runner
+cd /opt/actions-runner
+./config.sh --url https://github.com/TU_USUARIO/TU_REPO --token EL_TOKEN_DE_GITHUB
+exit
 ```
 
-En **Settings → Secrets and variables → Actions → New repository secret**, creá:
+3. Instalá el runner como servicio, para que quede escuchando siempre (incluso
+   tras reiniciar la VM):
 
-| Secret | Valor |
-|---|---|
-| `GCP_SA_KEY` | Todo el contenido de `key.json` |
-| `GCP_PROJECT_ID` | Tu Project ID (ej: `ryn-gym`) |
-| `GCP_ZONE` | `southamerica-east1-a` |
-| `VM_NAME` | `menu-food-truck-vm` |
-| `DB_HOST` | La `ip_de_la_base` que imprimió Terraform |
-| `DB_PORT` | `5432` |
-| `DB_NAME` | `menu` |
-| `DB_USER` | `menu` |
-| `DB_PASSWORD` | La misma que pusiste en `terraform.tfvars` |
+```bash
+cd /opt/actions-runner
+sudo ./svc.sh install runner
+sudo ./svc.sh start
+```
 
-El pipeline no tiene NADA sensible escrito: todo sale de estos secrets.
+En **Settings → Actions → Runners** vas a ver el runner en verde (**Idle**).
+Listo: **no hay ninguna llave de GCP en juego.**
 
-### Paso 4 — Desplegar desde el botón
+### Paso 3 — Los datos de la base
 
-En la pestaña **Actions** → workflow **"Desplegar en la VM"** → botón
-**"Run workflow"**. El pipeline se loguea en GCP, arma el `.env` con los secrets,
-copia el proyecto a la VM y corre `docker compose up -d --build`.
+El workflow arma el `.env` con los datos de conexión a Postgres. Tenés dos formas:
+
+- **Rápida (hackathon):** dejarlos escritos en el `.env` del workflow, como están
+  ahora. Sirve para infra descartable. La `ip_de_la_base` la sacás de
+  `terraform output secrets_github` y la contraseña de `terraform output -raw db_password`.
+- **Recomendada (real):** guardarlos como **GitHub Secrets** (`DB_HOST`, `DB_PORT`,
+  `DB_NAME`, `DB_USER`, `DB_PASSWORD`) y en el workflow usar `${{ secrets.DB_HOST }}`,
+  etc. Así no quedan a la vista en el repo ni en los logs.
+
+### Paso 4 — Desplegar: `git push`
+
+```bash
+git add .
+git commit -m "Cambio en el menú"
+git push
+```
+
+Al pushear a `main`, el runner de la VM se despierta, baja el código, arma el
+`.env` y corre `docker compose up -d --build`. Todo pasa **adentro de la VM**.
+(También podés dispararlo a mano desde **Actions → Run workflow**.)
 
 ### Paso 5 — El momento "ohhh"
 
