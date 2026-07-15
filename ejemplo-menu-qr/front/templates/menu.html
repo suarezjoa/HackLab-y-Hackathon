@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Food Truck — Menú del día</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #f5f5f5;
+           margin: 0; padding: 2rem 1rem; }
+    .cont { max-width: 480px; margin: 0 auto; }
+    h1 { text-align: center; font-size: 2rem; margin-bottom: .25rem; }
+    .sub { text-align: center; color: #ffb703; margin-bottom: 2rem; }
+    .plato { display: flex; justify-content: space-between; align-items: baseline;
+             padding: 1rem 0; border-bottom: 1px dashed #444; }
+    .nombre { font-size: 1.15rem; }
+    .precio { font-size: 1.15rem; font-weight: 700; color: #ffb703; white-space: nowrap; }
+    .vacio { text-align: center; color: #888; margin-top: 3rem; }
+    .pie { text-align: center; margin-top: 2.5rem; }
+    .pie a { color: #666; font-size: .85rem; text-decoration: none; }
+    .error { background: #3a1212; border: 1px solid #a33; border-radius: 8px;
+             padding: 1rem; margin-top: 2rem; color: #ffb3b3; font-size: .9rem; }
+    code { color: #ffd; }
+    details.agregar { margin-top: 2rem; border-top: 1px solid #333; padding-top: 1.5rem; }
+    details.agregar summary { cursor: pointer; color: #ffb703; font-weight: 700;
+                              list-style: none; }
+    details.agregar summary::-webkit-details-marker { display: none; }
+    .formadd { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+    .formadd input { padding: .6rem; border: none; border-radius: 8px; font-size: 1rem; }
+    .formadd input[name=nombre] { flex: 1; min-width: 160px; }
+    .formadd input[name=precio] { width: 110px; }
+    .formadd button { background: #ffb703; border: none; border-radius: 8px;
+                      padding: .6rem 1.1rem; font-weight: 700; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="cont">
+    <h1>🍔 Food Truck</h1>
+    <p class="sub">Menú del día</p>
+
+    {% if error %}
+      <div class="error">
+        ⚠️ No pude conectar con la API (<code>{{ error }}</code>).<br>
+        Revisá que el servicio <b>app</b> esté arriba y que llegue a Cloud SQL.
+      </div>
+    {% else %}
+      {% for plato in platos %}
+        <div class="plato">
+          <span class="nombre">{{ plato.nombre }}</span>
+          <span class="precio">${{ plato.precio }}</span>
+        </div>
+      {% else %}
+        <p class="vacio">Hoy no hay platos cargados 😅</p>
+      {% endfor %}
+
+      <details class="agregar">
+        <summary>➕ Agregar producto</summary>
+        <form class="formadd" method="post" action="/agregar">
+          <input name="nombre" placeholder="Nombre del producto" required>
+          <input name="precio" type="number" placeholder="Precio" min="0" required>
+          <button>Agregar</button>
+        </form>
+      </details>
+    {% endif %}
+
+    <p class="pie"><a href="/qr">📱 Ver QR</a></p>
+  </div>
+</body>
+</html>

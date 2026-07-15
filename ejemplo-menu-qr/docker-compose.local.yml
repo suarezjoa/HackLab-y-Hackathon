@@ -1,0 +1,57 @@
+# =============================================================================
+#  docker-compose LOCAL — para probar en tu compu, SIN tocar GCP.
+#
+#  Diferencias con el docker-compose.yml de producción:
+#    - Las imágenes se CONSTRUYEN acá (build:) en vez de bajarlas del registro.
+#    - Hay un contenedor "db" con Postgres, en vez de usar Cloud SQL.
+#
+#  Cómo usarlo:
+#      docker compose -f docker-compose.local.yml up --build
+#  Después abrí:  http://localhost:8080   (y /admin para editar)
+#  Para frenar y borrar todo:
+#      docker compose -f docker-compose.local.yml down -v
+# =============================================================================
+
+services:
+  # Base de datos local (reemplaza a Cloud SQL solo para probar).
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: menu
+      POSTGRES_USER: menu
+      POSTGRES_PASSWORD: menu
+    # Guardamos los datos en un volumen, así sobreviven a reinicios.
+    # (Se borran solo si hacés `down -v`.)
+    volumes:
+      - datos_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U menu -d menu"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: ./app
+    restart: always
+    environment:
+      DB_HOST: db # el nombre del servicio de la base
+      DB_PORT: "5432"
+      DB_NAME: menu
+      DB_USER: menu
+      DB_PASS: menu
+    depends_on:
+      db:
+        condition: service_healthy # esperamos a que Postgres esté listo
+
+  front:
+    build: ./front
+    restart: always
+    environment:
+      API_URL: http://app:8000
+    ports:
+      - "8080:8080" # entrás por http://localhost:8080
+    depends_on:
+      - app
+
+volumes:
+  datos_db: # acá viven los datos de Postgres entre reinicios

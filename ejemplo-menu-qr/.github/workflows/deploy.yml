@@ -1,0 +1,77 @@
+# =============================================================================
+#  Pipeline: construir las imágenes (front y app) y actualizar la VM.
+#
+#  Se dispara al subir cambios a main. Pasos:
+#    1) construir y publicar las dos imágenes en Artifact Registry
+#    2) copiar el docker-compose.yml a la VM
+#    3) en la VM: docker compose pull && up -d  (levanta la versión nueva)
+#
+#  Terraform ya dejó en la VM el archivo .env con los datos de Cloud SQL,
+#  así que el pipeline no maneja secretos de la base.
+#
+#  Para que corra en GitHub, este archivo debe vivir en .github/workflows/
+#  en la RAÍZ del repositorio.
+# =============================================================================
+
+name: Desplegar menú (VM + docker-compose)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ejemplo-menu-qr/front/**"
+      - "ejemplo-menu-qr/app/**"
+      - "ejemplo-menu-qr/docker-compose.yml"
+      - ".github/workflows/deploy.yml"
+
+env:
+  PROJECT_ID: mi-proyecto-food-truck
+  REGION: southamerica-east1
+  ZONE: southamerica-east1-a
+  REPO: menu-food-truck
+  VM: menu-food-truck-vm
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Bajar el código
+        uses: actions/checkout@v4
+
+      - name: Loguearse en GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Instalar gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configurar Docker
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # Construimos y subimos las dos imágenes con la etiqueta "latest".
+      - name: Construir y publicar el front
+        run: |
+          IMG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/front:latest"
+          docker build -t "$IMG" ejemplo-menu-qr/front
+          docker push "$IMG"
+
+      - name: Construir y publicar la app
+        run: |
+          IMG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/app:latest"
+          docker build -t "$IMG" ejemplo-menu-qr/app
+          docker push "$IMG"
+
+      # Copiamos el compose a la VM.
+      - name: Copiar docker-compose a la VM
+        run: |
+          gcloud compute scp ejemplo-menu-qr/docker-compose.yml \
+            ${{ env.VM }}:/opt/menu/docker-compose.yml \
+            --zone ${{ env.ZONE }} --project ${{ env.PROJECT_ID }} --quiet
+
+      # En la VM: bajamos las imágenes nuevas y levantamos.
+      - name: Levantar en la VM
+        run: |
+          gcloud compute ssh ${{ env.VM }} \
+            --zone ${{ env.ZONE }} --project ${{ env.PROJECT_ID }} --quiet \
+            --command "cd /opt/menu && sudo docker compose pull && sudo docker compose up -d"

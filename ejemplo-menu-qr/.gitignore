@@ -1,0 +1,4 @@
+# Nunca subir al repo:
+.env             # datos de conexión (se genera en la VM / local)
+key.json         # clave de la cuenta de servicio del pipeline
+__pycache__/
