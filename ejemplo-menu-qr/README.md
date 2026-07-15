@@ -47,28 +47,32 @@ contenedores. La **única** pieza gestionada aparte es la base de datos, en
 ## Qué hay en cada carpeta
 
 ```
-ejemplo-menu-qr/
-├── docker-compose.yml        → define front + app (corre en la VM)
-├── front/                    → la web (Python + Flask)
-│   ├── main.py · templates/ · requirements.txt · Dockerfile
-├── app/                      → la API (Flask + Postgres)
-│   ├── main.py · requirements.txt · Dockerfile
-├── terraform/                → TODA la infraestructura
-│   ├── main.tf               → VM + Cloud SQL + registro + red + permisos
-│   ├── variables.tf · outputs.tf · terraform.tfvars.example
-└── .github/workflows/
-    └── deploy.yml             → construye imágenes y actualiza la VM
+<raíz-del-repo>/
+├── .github/workflows/
+│   └── deploy.yml            → el pipeline (se corre con un botón en Actions)
+└── ejemplo-menu-qr/
+    ├── docker-compose.yml    → define front + app (corre en la VM)
+    ├── front/                → la web (Python + Flask)
+    │   └── main.py · templates/ · requirements.txt · Dockerfile
+    ├── app/                  → la API (Flask + Postgres)
+    │   └── main.py · requirements.txt · Dockerfile
+    └── terraform/            → la infraestructura (VM + Postgres), un archivo por tema
+        └── versions.tf · variables.tf · apis.tf · network.tf
+            vm.tf · database.tf · outputs.tf · README.md
 ```
+
+> El `deploy.yml` vive en `.github/workflows/` de la **raíz del repo** (GitHub
+> solo ejecuta workflows desde ahí, no desde subcarpetas).
 
 ---
 
 ## Cómo funciona el reparto de tareas
 
-- **Terraform** crea la VM y, en su arranque, deja instalado Docker + compose y
-  escribe un archivo `.env` en `/opt/menu/` con los datos de conexión a Cloud
-  SQL. Es decir: **la VM ya sabe hablarle a la base** apenas se crea.
-- **El pipeline** solo se ocupa de las imágenes: las construye, las publica y en
-  la VM hace `docker compose pull && up -d`. **No maneja secretos de la base.**
+- **Terraform** crea la VM (con Docker + docker compose ya instalados) y la base
+  Postgres en Cloud SQL. Nada más: no escribe configuración adentro de la VM.
+- **El pipeline** (a mano, desde Actions) arma el `.env` con los datos de la base
+  a partir de los **secrets de GitHub**, copia el código a la VM y corre
+  `docker compose up -d --build` para construir y levantar todo.
 
 ---
 
@@ -146,7 +150,7 @@ SELECT * FROM platos;
 > Necesitás: cuenta de GCP con facturación activa, y `gcloud`, `terraform` y
 > `docker` instalados. Además un repo en GitHub.
 
-### Paso 1 — Terraform crea toda la infra
+### Paso 1 — Terraform crea la infra (VM + Postgres)
 
 ```bash
 cd terraform
@@ -158,48 +162,65 @@ terraform plan      # muestra QUÉ va a crear (todavía no crea nada)
 terraform apply     # lo crea de verdad
 ```
 
-Al terminar imprime:
+Al terminar imprime `ip_de_la_vm`, `ip_de_la_base` y `comando_ssh`.
+(Detalle del ciclo plan/apply/destroy en [`terraform/README.md`](terraform/README.md).)
 
-- `url_de_la_web` → `http://<ip>` (la que va en el QR).
-- `ip_de_la_vm` → para entrar por SSH.
-- `ip_de_la_base` → la IP de Postgres (ya quedó en el `.env` de la VM).
-- `ruta_del_repo` y `email_cuenta_pipeline`.
+### Paso 2 — Sacar la llave del pipeline
 
-### Paso 2 — Darle la llave al pipeline
+La cuenta de servicio del pipeline, sus permisos y su llave **ya los creó
+Terraform** (archivo `cicd.tf`). Solo tenés que extraer la llave:
 
 ```bash
-gcloud iam service-accounts keys create key.json --iam-account=<email_cuenta_pipeline>
+terraform output -raw clave_pipeline > key.json
 ```
 
-En GitHub: **Settings → Secrets and variables → Actions → New repository secret**
-- Nombre: `GCP_SA_KEY`
-- Valor: todo el contenido de `key.json`
+Ese `key.json` es el valor del secret `GCP_SA_KEY` (paso siguiente).
 
 > ⚠️ `key.json` es una contraseña: no la subas al repo y borrala al terminar.
 
-### Paso 3 — Ajustar el pipeline y hacer push
+### Paso 3 — Cargar TODOS los secrets en GitHub
 
-En `.github/workflows/deploy.yml`, revisá que `PROJECT_ID`, `REGION`, `ZONE`,
-`REPO` y `VM` coincidan con tu Terraform. Después:
+Terraform te deja los valores listos. Los 7 no-secretos se imprimen al terminar
+el `apply` (o corré `terraform output secrets_github`). Los 2 secretos se piden
+aparte:
 
 ```bash
-git add .
-git commit -m "Primer deploy del menú"
-git push
+terraform output secrets_github        # los 7 valores para copiar y pegar
+terraform output -raw clave_pipeline    # GCP_SA_KEY
+terraform output -raw db_password       # DB_PASSWORD
 ```
 
-En la pestaña **Actions** vas a ver el pipeline: construye el front y la app,
-los sube al registro, copia el compose a la VM y levanta todo.
+En **Settings → Secrets and variables → Actions → New repository secret**, creá:
 
-### Paso 4 — El momento "ohhh"
+| Secret | Valor |
+|---|---|
+| `GCP_SA_KEY` | Todo el contenido de `key.json` |
+| `GCP_PROJECT_ID` | Tu Project ID (ej: `ryn-gym`) |
+| `GCP_ZONE` | `southamerica-east1-a` |
+| `VM_NAME` | `menu-food-truck-vm` |
+| `DB_HOST` | La `ip_de_la_base` que imprimió Terraform |
+| `DB_PORT` | `5432` |
+| `DB_NAME` | `menu` |
+| `DB_USER` | `menu` |
+| `DB_PASSWORD` | La misma que pusiste en `terraform.tfvars` |
 
-1. Abrí la `url_de_la_web` (o entrá a `<url_de_la_web>/qr` y escaneá el código).
+El pipeline no tiene NADA sensible escrito: todo sale de estos secrets.
+
+### Paso 4 — Desplegar desde el botón
+
+En la pestaña **Actions** → workflow **"Desplegar en la VM"** → botón
+**"Run workflow"**. El pipeline se loguea en GCP, arma el `.env` con los secrets,
+copia el proyecto a la VM y corre `docker compose up -d --build`.
+
+### Paso 5 — El momento "ohhh"
+
+1. Abrí `http://<ip_de_la_vm>` (o `http://<ip_de_la_vm>/qr` y escaneá el código).
 2. Aparece el menú del día (viene de Postgres, vía la API).
-3. Entrá a `<url_de_la_web>/admin`, cambiá un precio o agregá un plato.
-4. Refrescá el menú: el cambio ya está.
+3. Entrá a `/admin` o tocá **➕ Agregar producto**, y cargá un plato.
+4. Refrescá: el cambio ya está, y quedó guardado en Cloud SQL.
 
-Todo corre en una VM, con la base afuera en Cloud SQL, y cada cambio de código
-se publica solo con un `git push`.
+Todo corre en una VM, con la base afuera en Cloud SQL, y el deploy se dispara
+con un botón desde GitHub.
 
 ---
 
@@ -217,10 +238,10 @@ se publica solo con un `git push`.
 
 | Concepto de las clases | En este ejemplo |
 |---|---|
-| Terraform levanta **infraestructura** | `terraform/` crea la VM, Cloud SQL, el registro, la red y los permisos |
+| Terraform levanta **infraestructura** | `terraform/` crea la VM, Cloud SQL, la red y los permisos |
 | Contenedores empaquetan **la app** | `front/Dockerfile` y `app/Dockerfile` |
 | **docker-compose** orquesta varios contenedores | `docker-compose.yml` levanta front + app juntos |
-| Pipelines **llevan** el código a producción | `.github/workflows/deploy.yml` |
+| Pipelines **llevan** el código a producción | `.github/workflows/deploy.yml` (botón en Actions) |
 
 ---
 

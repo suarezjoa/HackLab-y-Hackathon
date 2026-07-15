@@ -1,0 +1,33 @@
+# =============================================================================
+#  docker-compose que corre DENTRO de la VM.
+#
+#  Levanta dos contenedores:
+#    - app   : la API (Python + Flask). Habla con Cloud SQL (Postgres).
+#    - front : la web. Le pega a "app" por la red interna del compose.
+#
+#  Las imágenes se CONSTRUYEN acá mismo, desde el código (build:). No usamos
+#  ningún registro: el pipeline copia esta carpeta a la VM y corre
+#  `docker compose up -d --build`.
+#
+#  Los datos de conexión a Cloud SQL vienen del archivo .env, que el pipeline
+#  genera en la VM a partir de los secrets de GitHub.
+# =============================================================================
+
+services:
+  app:
+    build: ./app
+    restart: always
+    # Trae DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS desde el .env.
+    env_file: .env
+    # No publicamos puertos al host: a la API solo la ve el front (red interna).
+
+  front:
+    build: ./front
+    restart: always
+    environment:
+      # "app" es el nombre del otro servicio: docker lo resuelve solo.
+      - API_URL=http://app:8000
+    ports:
+      - "80:8080" # el mundo entra por el 80; adentro la web escucha en el 8080
+    depends_on:
+      - app
