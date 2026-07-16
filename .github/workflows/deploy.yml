@@ -15,29 +15,71 @@
 #  Este archivo debe vivir en .github/workflows/ en la RAÍZ del repositorio.
 # =============================================================================
 
+
+# -----------------------------------------------------------------------------
+# name: nombre visible del workflow.
+# Es la etiqueta que aparece en la pestaña "Actions" de GitHub. Sirve solo
+# para identificarlo entre otros workflows; no afecta a la ejecución.
+# -----------------------------------------------------------------------------
 name: Deploy automatico en la VM
 
+
+# -----------------------------------------------------------------------------
+# on: el DISPARADOR (trigger). Define QUÉ evento arranca el pipeline.
+# Aquí: cada "push" (subida de commits) a la rama main lanza el deploy.
+# Si empujas a otra rama (p.ej. una feature branch) no pasa nada.
+# -----------------------------------------------------------------------------
 on:
   push:
     branches: [ main ] # cada push a main despliega solo
 
+
+# -----------------------------------------------------------------------------
+# jobs: la lista de trabajos que ejecuta el workflow.
+# Aquí hay un único job llamado "deploy". Un job es un conjunto de pasos que
+# corren juntos en la misma máquina.
+# -----------------------------------------------------------------------------
 jobs:
   deploy:
+    # runs-on: DÓNDE se ejecuta el job.
+    # "self-hosted" = en NUESTRO propio runner, el agente instalado dentro de
+    # la VM de GCP. Por eso no necesitamos SSH ni gcloud: el pipeline ya está
+    # ejecutándose físicamente en el servidor de destino.
     runs-on: self-hosted # corre en el agente que vive EN la VM
+
+    # steps: la secuencia de PASOS del job, en orden. Cada paso es un comando
+    # (run) o una acción reutilizable (uses).
     steps:
+      # PASO 1 — Traer el código.
+      # actions/checkout@v4 es una acción oficial de GitHub que clona el repo
+      # (la rama que disparó el push) en el directorio de trabajo del runner.
+      # Sin esto, la VM no tendría los archivos actualizados del proyecto.
       - name: Bajar el código en la VM
         uses: actions/checkout@v4
 
+      # PASO 2 — Generar el archivo .env con la configuración de la base.
+      # "run: |" ejecuta un bloque de shell. El "cat > ... <<'EOF' ... EOF"
+      # es un here-document: escribe todo lo que hay entre EOF y EOF dentro
+      # del archivo ejemplo-menu-qr/.env.
+      # Estas variables (host, puerto, nombre, usuario, contraseña) son las que
+      # la app leerá para conectarse a Cloud SQL / PostgreSQL.
+      # ⚠️ Están en texto plano: correcto solo para un entorno descartable.
       - name: Generar el .env (valores a la vista, sin secrets)
         run: |
           cat > ejemplo-menu-qr/.env <<'EOF'
-          DB_HOST=34.39.199.46
+          DB_HOST=34.39.202.141
           DB_PORT=5432
           DB_NAME=menu
           DB_USER=menu
           DB_PASS=seguro1234
           EOF
 
+      # PASO 3 — Construir y levantar la aplicación.
+      # Entramos a la carpeta del proyecto y ejecutamos docker compose:
+      #   up       -> crea/inicia los contenedores definidos en docker-compose.yml
+      #   -d       -> detached: quedan corriendo en segundo plano
+      #   --build  -> reconstruye las imágenes con el código recién bajado
+      # El resultado es la app actualizada y en marcha dentro de la VM.
       - name: Construir y levantar
         run: |
           cd ejemplo-menu-qr
