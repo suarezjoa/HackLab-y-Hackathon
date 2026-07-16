@@ -1,0 +1,6 @@
+# Nunca subir al repo: estado, credenciales y variables locales.
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.json

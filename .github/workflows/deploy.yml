@@ -67,7 +67,7 @@ jobs:
       - name: Generar el .env (valores a la vista, sin secrets)
         run: |
           cat > ejemplo-menu-qr/.env <<'EOF'
-          DB_HOST=34.39.202.141
+          DB_HOST=34.95.143.117
           DB_PORT=5432
           DB_NAME=menu
           DB_USER=menu
